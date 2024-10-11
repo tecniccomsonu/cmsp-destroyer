@@ -15,8 +15,9 @@
     'use strict';
 
     const lessonRegex = /https:\/\/cmsp\.ip\.tv\/mobile\/tms\/task\/\d+\/apply/;
+    console.log("-- STARTING CMSP DESTROYER by tecnic --");
 
-    function transformJson(originalJson) {
+    function buildAnswerJson(originalJson) {
         const newJson = {
             status: "submitted",
             accessed_on: originalJson.accessed_on,
@@ -40,6 +41,7 @@
                     break;
                 case "text_ai":
                     answer = taskQuestion.comment.replace(/<\/?p>/g, '');
+                    answer = { "0": answer };
                     break;
                 case "fill-letters":
                     answer = taskQuestion.options.answer;
@@ -51,79 +53,77 @@
                     answer = Object.fromEntries(
                         Object.keys(taskQuestion.options).map(optionId => [optionId, taskQuestion.options[optionId].answer])
                     );
+                    break;
             }
 
             newJson.answers[questionId] = {
                 question_id: question.question_id,
                 question_type: taskQuestion.type,
-                answer
+                answer: answer
             };
         });
 
         return newJson;
     }
 
-    let currentHref = document.location.href;
+    let currentUrl = document.location.href;
     const observer = new MutationObserver(() => {
-        if (currentHref !== document.location.href) {
-            currentHref = document.location.href;
-
-            if (lessonRegex.test(currentHref)) {
+        if (currentUrl !== document.location.href) {
+            currentUrl = document.location.href;
+            if (lessonRegex.test(currentUrl)) {
                 console.log("[DEBUG] LESSON DETECTED");
 
-                const { auth_token: authKey } = JSON.parse(sessionStorage.getItem("cmsp.ip.tv:iptvdashboard:state")).auth;
-                const { name: roomName } = JSON.parse(sessionStorage.getItem("cmsp.ip.tv:iptvdashboard:state")).room.room;
-                const lessonId = currentHref.split("/")[6];
+                const sessionState = JSON.parse(sessionStorage.getItem("cmsp.ip.tv:iptvdashboard:state"));
+                const authToken = sessionState.auth.auth_token;
+                const roomName = sessionState.room.room.name;
+                const taskId = currentUrl.split("/")[6];
+                console.log(`[DEBUG] LESSON_ID: ${taskId} ROOM_NAME: ${roomName}`);
 
-                console.log(`[DEBUG] LESSON_ID: ${lessonId} ROOM_NAME: ${roomName}`);
-
-                // Aguardar 1 segundo antes de sair da tarefa
-                setTimeout(() => {
-                    console.log("[DEBUG] Exiting the task...");
-                    window.history.back(); // Sai da tarefa voltando para a página anterior
-                }, 1000);
-                
-                const draftBody = {
+                const draftData = {
                     status: "draft",
                     accessed_on: "room",
                     executed_on: roomName,
                     answers: {}
                 };
 
-                const sendRequest = (method, url, data, callback) => {
+                function makeRequest(method, url, data, callback) {
                     const xhr = new XMLHttpRequest();
                     xhr.open(method, url);
-                    xhr.setRequestHeader("X-Api-Key", authKey);
+                    xhr.setRequestHeader("X-Api-Key", authToken);
                     xhr.setRequestHeader("Content-Type", "application/json");
                     xhr.onload = () => callback(xhr);
                     xhr.onerror = () => console.error('Request failed');
                     xhr.send(data ? JSON.stringify(data) : null);
-                };
+                }
 
-                sendRequest("POST", `https://edusp-api.ip.tv/tms/task/${lessonId}/answer`, draftBody, (response) => {
+                makeRequest("POST", `https://edusp-api.ip.tv/tms/task/${taskId}/answer`, draftData, (response) => {
                     console.log("[DEBUG] DRAFT_DONE, RESPONSE: ", response.responseText);
-                    const { id: taskId } = JSON.parse(response.responseText);
-                    const answersUrl = `https://edusp-api.ip.tv/tms/task/${lessonId}/answer/${taskId}?with_task=true&with_genre=true&with_questions=true&with_assessed_skills=true`;
+                    const responseData = JSON.parse(response.responseText);
+                    const taskResponseId = responseData.id;
+                    const getAnswersUrl = `https://edusp-api.ip.tv/tms/task/${taskId}/answer/${taskResponseId}?with_task=true&with_genre=true&with_questions=true&with_assessed_skills=true`;
 
-                    sendRequest("GET", answersUrl, null, (response) => {
-                        console.log("[DEBUG] Get Answers response received");
+                    console.log("[DEBUG] Getting Answers...");
+
+                    makeRequest("GET", getAnswersUrl, null, (response) => {
+                        console.log("[DEBUG] GET ANSWERS RESPONSE: ", response.responseText);
                         const answersResponse = JSON.parse(response.responseText);
-                        const answersBody = transformJson(answersResponse);
+                        const finalAnswers = buildAnswerJson(answersResponse);
 
-                        console.log(`[DEBUG] Sending Answers... BODY: ${JSON.stringify(answersBody)}`);
+                        console.log("[DEBUG] Sending Answers... BODY: ", JSON.stringify(finalAnswers));
 
-                        sendRequest("PUT", `https://edusp-api.ip.tv/tms/task/${lessonId}/answer/${taskId}`, answersBody, (response) => {
+                        makeRequest("PUT", `https://edusp-api.ip.tv/tms/task/${taskId}/answer/${taskResponseId}`, finalAnswers, (response) => {
                             if (response.status !== 200) {
-                                alert(`[ERROR] An error occurred while sending the answers. RESPONSE: ${response.responseText}`);
-                            } else {
-                                console.log(`[DEBUG] Answers Sent! RESPONSE: ${response.responseText}`);
+                                alert(`[ERROR] Failed to send answers. RESPONSE: ${response.responseText}`);
+                            }
+                            console.log("[DEBUG] Answers Sent! RESPONSE: ", response.responseText);
 
-                                const watermark = document.querySelector('.MuiTypography-root.MuiTypography-body1.css-1exusee');
-                                if (watermark) {
-                                    setTimeout(() => {
-                                        document.querySelector('button.MuiButtonBase-root.MuiButton-root.MuiLoadingButton-root.MuiButton-contained.MuiButton-containedInherit.MuiButton-sizeMedium.MuiButton-containedSizeMedium.MuiButton-colorInherit.css-prsfpd').click();
-                                    }, 500);
-                                }
+                            const watermark = document.querySelector('.MuiTypography-root.MuiTypography-body1.css-1exusee');
+                            if (watermark) {
+                                watermark.textContent = 'Realizando tarefa...';
+                                watermark.style.fontSize = '70px';
+                                setTimeout(() => {
+                                    document.querySelector('button.MuiButtonBase-root.MuiButton-root.MuiLoadingButton-root.MuiButton-contained.MuiButton-containedInherit.MuiButton-sizeMedium.MuiButton-containedSizeMedium.MuiButton-colorInherit.css-prsfpd').click();
+                                }, 500);
                             }
                         });
                     });
@@ -132,12 +132,6 @@
         }
     });
 
-    observer.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
+    observer.observe(document.body, { childList: true, subtree: true });
 })();
 
-        subtree: true
-    });
-})();
