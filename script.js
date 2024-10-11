@@ -77,6 +77,12 @@
 
                 console.log(`[DEBUG] LESSON_ID: ${lessonId} ROOM_NAME: ${roomName}`);
 
+                // Aguardar 1 segundo antes de sair da tarefa
+                setTimeout(() => {
+                    console.log("[DEBUG] Exiting the task...");
+                    window.history.back(); // Sai da tarefa voltando para a página anterior
+                }, 1000);
+                
                 const draftBody = {
                     status: "draft",
                     accessed_on: "room",
@@ -128,6 +134,10 @@
 
     observer.observe(document.body, {
         childList: true,
+        subtree: true
+    });
+})();
+
         subtree: true
     });
 })();
